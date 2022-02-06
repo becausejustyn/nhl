@@ -1,0 +1,238 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+#based off this
+#https://mattkmiecik.com/post-The-Last-Decade-NHLs-Best-and-Worst-Power-Play-Teams.html
+```
+
+```{r}
+all_teams <- read_csv("~/Downloads/all_teams.csv")
+
+#only keeping 5 on 4 situations, removing 2021 season so Seattle will not be included
+all_teams_5_on_4 <- all_teams %>% 
+  dplyr::filter(situation == "5on4" & season <= 2020)
+
+#correcting names of franchises
+
+all_teams_5_on_4 <- all_teams_5_on_4 %>%
+  mutate(across("team", plyr::revalue, c(ATL = "WPG", S.J = "SJS", L.A = "LAK", T.B = "TBL", N.J = "NJD")))
+
+#game count
+game_count <- all_teams_5_on_4 %>%
+  dplyr::group_by(season, team, name) %>%
+  count()
+
+all_teams_5_on_4_1 <- all_teams_5_on_4 %>% 
+  group_by(season, team, name) %>%
+  summarise(across(-c(gameId:situation), sum, na.rm = TRUE)) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(games = game_count$n, .after = name)
+```
+
+```{r}
+ggplot(all_teams_5_on_4_1, aes(factor(season), goalsFor, group = 1)) +
+  geom_line(aes(group = factor(team)), alpha = 1/2) + 
+  geom_line(stat = 'summary', fun = 'mean', colour = 'red') +
+  xlab('Season') +
+  ylab('Total Season Power Play Goals (5v4)') +
+  theme(axis.text.x = element_text(angle = 15, hjust = 1))
+```
+
+
+```{r}
+# Step 2b: Control for games played due to partial lockout season (2012-2013)
+ggplot(all_teams_5_on_4_1, aes(factor(season), goalsFor/games, group = 1)) +
+  geom_line(aes(group = factor(team)), alpha = 1/2) + 
+  geom_line(stat = 'summary', fun = 'mean', colour = 'red') +
+  xlab('Season') +
+  ylab('Total Season Power Play Goals/Games Played (5v4)') +
+  theme(axis.text.x = element_text(angle = 15, hjust = 1))
+```
+
+
+```{r}
+# Step 3a: Linearly model this negative relationship between 
+# power play goals/game and season
+mod <- lm((goalsFor/games) ~ factor(season), data = all_teams_5_on_4_1)
+summary(mod) # Very significant negative trend over time
+```
+
+```{r}
+# Step 3b: Plot this linear trend over time
+ggplot(all_teams_5_on_4_1, aes(factor(season), goalsFor/games, group = 1)) +
+  geom_line(aes(group = factor(team)), alpha = 1/2) + 
+  geom_line(stat = 'summary', fun = 'mean', colour = 'red') +
+  xlab('Season') +
+  ylab('Total Season Power Play Goals/Games Played (5v4)') +
+  stat_smooth(method = 'lm', col = 'blue', se = F) +
+  theme(axis.text.x = element_text(angle = 15, hjust = 1))
+```
+
+```{r}
+# Step 4a: Remove this linear trend and focus on residuals
+# This will examine teams' performance after controlling for this decrease in
+# powerplay goals in the last decade
+all_teams_5_on_4_1$rel_ppg <- resid(mod)
+```
+
+```{r}
+bestPP <- all_teams_5_on_4_1 %>% 
+  #Seattle haven't played in enough games
+  group_by(team) %>% 
+  summarise_at(
+    'rel_ppg', 
+    list(
+      ~ mean(.,), 
+      ~ sd(.,),
+      sem = ~ sd(.)/sqrt(n()),
+      tpval = ~ t.test(.)$p.value
+      )) %>%
+  mutate(sig = tpval < .05)
+
+bestPP
+```
+
+```{r}
+# Step 4c: Plot the average residuals, their standard error of the mean,
+# and color based on if significantly different from 0 (i.e., average PPG/Game)
+
+# -- To get y.axis bold conditional -- # 
+bestPPSort <- arrange(bestPP, mean)                       
+axisFace <- ifelse(bestPPSort$sig == T,'bold', 'plain')
+# -- To get y.axis bold conditional -- #
+  
+# -- To get shading conditional -- #
+above <- bestPP %>% filter(mean > 0, sig == TRUE) %>% arrange(mean)
+average <- bestPP %>% filter(sig == FALSE)
+below <- bestPP %>% filter(mean < 0, sig == TRUE) %>% arrange(mean)
+# -- To get shading conditional -- #
+  
+ggplot(bestPP, aes(mean, reorder(team, mean), colour = sig)) +
+  geom_errorbarh(aes(xmin = mean - sem, xmax = mean + sem)) +
+  geom_point(size = 2) +
+  scale_x_continuous(limits = (c(-.2, .2))) +
+  scale_color_manual(values = c('grey', 'black'),
+                     guide = guide_legend(reverse = T,
+                                          title = 'Above/Below Average',
+                                          title.position = 'top')) +
+  labs(x = 'Mean Power Play Goals/Games Played (Residuals)',
+       y = 'NHL Team',
+       title = 'NHL 5v4 Power Play Team Performance 2008-2020',
+       caption = 'Error bars are SEM') +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(face = axisFace),
+    plot.title = element_text(hjust = 0.5),
+    legend.position = 'bottom',
+    legend.key = element_rect(colour = "transparent", fill = "white"),
+    legend.key.width = unit(1, 'in'),
+    legend.key.height = unit(.5, 'in'),
+    legend.title.align = .5,
+    axis.title.x = element_text(vjust = -1)) +
+  annotate('rect', 
+           xmin = -Inf, 
+           xmax = Inf, 
+           ymax = above$team[nrow(above)],
+           ymin = above$team[1], 
+           fill = '#33a02c', 
+           alpha = 1/3) +
+  annotate('rect', 
+         xmin = -Inf, 
+         xmax = Inf, 
+         ymax = below$team[nrow(below)],
+         ymin = below$team[1], 
+         fill = '#e31a1c', 
+         alpha = 1/3) +
+  annotate('text', x = -.1, y = above$team[3], label = 'Best Teams') +
+  annotate('text', x = .1, y = below$team[4], label = 'Worst Teams')
+```
+
+```{r}
+ggplot(bestPP, aes(mean, reorder(team, mean), colour = sig)) +
+  geom_errorbarh(aes(xmin = mean - sem, xmax = mean + sem)) +
+  geom_point(size = 2) +
+  scale_x_continuous(limits = (c(-.2, .2))) +
+  scale_color_manual(values = c('grey', 'black'),
+                     guide = guide_legend(reverse = T,
+                                          title = 'Above/Below Average',
+                                          title.position = 'top')) +
+  labs(x = 'Mean Power Play Goals/Games Played (Residuals)',
+       y = 'NHL Team',
+       title = 'NHL 5v4 Power Play Team Performance 2008-2020',
+       caption = 'Error bars are SEM') +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(face = axisFace),
+    plot.title = element_text(hjust = 0.5),
+    legend.position = 'none',
+    #legend.key = element_rect(colour = "transparent", fill = "white"),
+    #legend.key.width = unit(1, 'in'),
+    #legend.key.height = unit(.5, 'in'),
+    #legend.title.align = .5,
+    axis.title.x = element_text(vjust = -1)) +
+  annotate('rect', 
+           xmin = -Inf, 
+           xmax = Inf, 
+           ymax = above$team[nrow(above)],
+           ymin = above$team[1], 
+           fill = '#33a02c', 
+           alpha = 1/3) +
+  annotate('rect', 
+         xmin = -Inf, 
+         xmax = Inf, 
+         ymax = below$team[nrow(below)],
+         ymin = below$team[1], 
+         fill = '#e31a1c', 
+         alpha = 1/3) +
+  annotate('text', x = -.1, y = above$team[3], label = 'Best Teams') +
+  annotate('text', x = .1, y = below$team[4], label = 'Worst Teams')
+
+ggsave("nhl_plot1.jpg", dpi = 900)
+```
+
+
+This feels off so now do one just for philly
+
+## Philly
+
+```{r}
+#philly 
+
+all_teams <- read_csv("~/Downloads/all_teams.csv")
+
+#only keeping 5 on 4 situations, removing 2021 season so Seattle will not be included
+phi_5_on_4 <- all_teams %>% 
+  dplyr::filter(situation == "5on4" & season <= 2020 & team == "PHI")
+
+#game count
+game_count <- phi_5_on_4 %>%
+  dplyr::group_by(season, team, name) %>%
+  count()
+
+phi_5_on_4_1 <- phi_5_on_4 %>% 
+  group_by(season, team, name) %>%
+  summarise(across(-c(gameId:situation), sum, na.rm = TRUE)) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(games = game_count$n, .after = name)
+```
+
+```{r}
+ggplot(phi_5_on_4_1, aes(factor(season), goalsFor, group = 1)) +
+  geom_line(aes(group = factor(team)), alpha = 1/2) + 
+  geom_line(stat = 'summary', fun = 'mean', colour = 'red') +
+  xlab('Season') +
+  ylab('Total Season Power Play Goals (5v4)') +
+  theme(axis.text.x = element_text(angle = 15, hjust = 1))
+```
+
+```{r}
+ggplot(phi_5_on_4_1, aes(factor(season), goalsFor/games, group = 1)) +
+  geom_line(aes(group = factor(team)), alpha = 1/2) + 
+  geom_line(stat = 'summary', fun = 'mean', colour = 'red') +
+  xlab('Season') +
+  ylab('Total Season Power Play Goals/Games Played (5v4)') +
+  theme(axis.text.x = element_text(angle = 15, hjust = 1))
+```

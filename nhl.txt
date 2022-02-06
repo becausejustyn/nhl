@@ -1,0 +1,27 @@
+https://jmsallan.netlify.app/blog/introducing-hypothesis-testing/
+
+https://jrnold.github.io/qss-tidy/probability.html#conditional-probability
+
+https://mattkmiecik.com/index.html
+
+
+Clustering NBA Player Types
+https://alexcstern.github.io/hoopDown.html
+
+Understanding + classifying genres using Spotify audio features
+https://www.kaylinpavlik.com/classifying-songs-genres/
+
+
+-
+mutate(across("team", str_replace, "S.J", "SJS"))
+
+-
+https://mattkmiecik.com/post-The-Last-Decade-NHLs-Best-and-Worst-Power-Play-Teams.html
+
+https://mattkmiecik.com/post-Multilevel-Modeling-in-R-with-NHL-Power-Play-Data.html
+
+https://mattkmiecik.com/post-Exploring-11-Years-of-Chicago-Blackhawks-Data-using-Principal-Components-Analysis.html
+
+https://mattkmiecik.com/post-Simulating-2018-NCAA-March-Madness-Tournament-Performance-in-R.html#matt%E2%80%99s_method
+
+https://vbaliga.github.io/replace-text-in-specific-column/
