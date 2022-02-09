@@ -11,9 +11,20 @@ library(RCurl)
 ```
 
 ```{r}
+#this is already summarised
+
+hockey_data <- purrr::map_df(c(2008:2021), function(x) {
+  read_csv(
+    url(
+    glue::glue("https://moneypuck.com/moneypuck/playerData/seasonSummary/{x}/regular/teams.csv")
+    )
+  )
+})
+```
+
+
+```{r}
 maybe <- read_csv("https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv")
-
-
 ```
 
 

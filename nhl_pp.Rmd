@@ -12,11 +12,13 @@ library(tidyverse)
 ```
 
 ```{r}
-maybe <- read_csv("https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv")
+#https://moneypuck.com/data.htm
+df <- read_csv("https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv")
 ```
 
 ```{r}
-maybe <- maybe %>%
+df1 <- df %>%
+  filter(playoffGame == 0) %>%
   mutate(team = str_replace_all(team,
       c(
         "ATL" = "WPG",
@@ -26,23 +28,21 @@ maybe <- maybe %>%
         "T.B" = "TBL"
       )),
     season_label = paste0(substr(season, 3, 4), "/", substr(season+1, 3, 4))
-  )
-```
-
-```{r}
-maybe_sum <- maybe %>%
-  select(team, season, situation:fenwickPercentage, 
-         xOnGoalFor:scoreFlurryAdjustedTotalShotCreditAgainst) %>%
+  ) %>% 
+  select(-c(name, playerTeam:position, playoffGame)) %>%
   group_by(team, season, situation) %>%
-  summarise(across(everything(), ~sum(.x, na.rm = TRUE)), .groups = "drop") %>% 
-  mutate(season_label = paste0(substr(season, 3, 4), "/", substr(season+1, 3, 4)))
+  add_count(gameId, name = 'games') %>%
+  ungroup()
+
+df1_summary <- df1 %>%
+  group_by(team, season, situation, season_label) %>%
+  summarise(across(everything(), ~sum(.x, na.rm = TRUE)), .groups = "drop") 
+
+df1_summary_5_v_4 <- filter(df1_summary, situation == '5on4')
 ```
 
-
-
 ```{r}
-maybe_sum %>%
-  filter(situation == '5on4') %>%
+df1_summary_5_v_4 %>%
   ggplot(aes(
     x = factor(season_label), y = goalsFor, group = 1)) +
   geom_line(aes(group = factor(team)), alpha = 1/2) + 
@@ -55,6 +55,170 @@ maybe_sum %>%
   hrbrthemes::theme_ft_rc()
 ```
 
+In this above plot, each team is a grey line, while the average total power play goals for each season is plotted in the red trend line. However, we see that this doesn’t control for the shortened lockout season that occurred in 2012-2013. Let’s control for this by dividing the total power play goals (GF) by the total games played (GP) each season.
+
+```{r}
+# Step 2b: Control for games played due to partial lockout season (2012-2013)
+df1_summary_5_v_4 %>%
+  ggplot(aes(
+    x = factor(season_label), 
+    y = goalsFor/games, group = 1)) +
+  geom_line(aes(group = factor(team)), alpha = 1/2) + 
+  geom_line(stat = 'summary', fun = 'mean', colour = 'blue', size = 1) +
+  labs(
+    x = "Season",
+    y = "Total Season Power Play Goals/Games Played (5v4)"
+  ) +
+  theme(axis.text.x = element_text(angle = 15, hjust = 1)) +
+  hrbrthemes::theme_ft_rc()
+```
+
+We now see each team’s power play performance controlled for the games played that season. What is interesting about this above plot is the seemingly decrease in power play goals across time. Let’s model this with a linear regression that predicts the total season power play goals controlled for games played as a function of time/season.
+
+```{r}
+# Step 3a: Linearly model this negative relationship between 
+# power play goals/game and season
+mod <- lm((goalsFor/games) ~ factor(season), data = df1_summary_5_v_4)
+summary(mod) # Very significant negative trend over time
+#broom::tidy(mod)
+```
+
+As we can see from the regression model and coefficients, power play goals are decreasing with each successive season. Here is a plot of this negative trend in blue.
+
+```{r}
+# Step 3b: Plot this linear trend over time
+df1_summary_5_v_4 %>%
+  ggplot(aes(
+    x = factor(season_label), 
+    y = goalsFor/games, group = 1)) +
+  geom_line(aes(group = factor(team)), alpha = 1/2) + 
+  geom_line(stat = 'summary', fun = 'mean', colour = 'blue', size = 1) +
+  labs(
+    x = "Season",
+    y = "Total Season Power Play Goals/Games Played (5v4)"
+  ) +
+  stat_smooth(method = 'lm', col = '#984ea3', se = FALSE, size = 1) +
+  theme(axis.text.x = element_text(angle = 15, hjust = 1)) +
+  hrbrthemes::theme_ft_rc()
+```
+
+I then wondered which teams, despite this decrease in power play goals over time, had the best or worst power play across the last decade? To remove this negative trend over time, I extracted the residuals from the model. The residuals are simply the distance from the blue line (the predicted power play goals over time) to each team’s grey line (total power play goals/games played for each year).
+
+```{r}
+# Step 4a: Remove this linear trend and focus on residuals
+# This will examine teams' performance after controlling for this decrease in
+# powerplay goals in the last decade
+
+df1_summary_5_v_4 <- df1_summary_5_v_4 %>%
+  mutate(rel_ppg = resid(mod))
+
+#df1_summary_5_v_4$rel_ppg <- resid(mod)
+```
+
+Next, I averaged these residuals for each individual team over ten years and ran one-sample t-tests to see the teams that significantly deviated from the average.
+
+```{r}
+# Step 4b: Average the residuals for each team over the past decade. Then,
+# perform a one-sample t-test (i.e., from zero) to see teams that were above
+# or below the average power play goals/game despite the decrease in 
+# power play goals in the last decade  
+
+bestPP <- df1_summary_5_v_4 %>% 
+  # Seattle have not played enough games
+  filter(team != 'SEA') %>%
+    group_by(team) %>%
+    summarise(
+        mean = mean(rel_ppg),
+        sd = sd(rel_ppg),
+        sem = sd(rel_ppg)/sqrt(n()),
+        tpval = t.test(rel_ppg)$p.value
+    ) %>%
+    mutate(sig = tpval < .05)
+
+print(bestPP)
+```
+
+Finally, I plotted these results. Teams that have positive averages that are different from zero are teams that are above average in the power play, despite the decrease in power play goals scored in the last decade. The teams with negative residual averages are the opposite and are below average in the power play. Error bars represent the standard error of the mean.
+
+```{r}
+# Step 4c: Plot the average residuals, their standard error of the mean,
+# and color based on if significantly different from 0 (i.e., average PPG/Game)
+
+# -- To get y.axis bold conditional -- # 
+bestPPSort <- arrange(bestPP, mean)                       
+axisFace <- ifelse(bestPPSort$sig == TRUE, 'bold', 'plain')
+# -- To get y.axis bold conditional -- #
+  
+# -- To get shading conditional -- #
+above <- bestPP %>% 
+  filter(mean > 0, sig == TRUE) %>% 
+  arrange(mean)
+
+average <- bestPP %>% 
+  filter(sig == FALSE)
+
+below <- bestPP %>% 
+  filter(mean < 0, sig == TRUE) %>% 
+  arrange(mean)
+
+# -- To get shading conditional -- #
+
+bestPP %>%
+  ggplot(aes(
+    x = mean,
+    y = reorder(team, mean),
+    colour = sig
+  )) +
+  geom_errorbarh(aes(
+    xmin = mean - sem,
+    xmax = mean + sem
+  )) +
+  geom_point(size = 2) +
+  scale_x_continuous(limits = (c(-.2, .2))) +
+  scale_color_manual(
+    values = c("grey", "black"),
+    guide = guide_legend(
+      reverse = TRUE,
+      title = "Above/Below Average",
+      title.position = "top"
+    )
+  ) +
+  labs(
+    x = "Mean Power Play Goals/Games Played (Residuals)",
+    y = "NHL Team",
+    title = "NHL 5v4 Power Play Team Performance 2008-2021",
+    caption = "Error bars are SEM \n Seattle excluded due to number of games."
+  ) +
+  hrbrthemes::theme_ft_rc() +
+  theme(
+    axis.text.y = element_text(face = axisFace),
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none",
+    legend.key = element_rect(colour = "transparent", fill = "white"),
+    legend.key.width = unit(1, "in"),
+    legend.key.height = unit(.5, "in"),
+    legend.title.align = .5,
+    axis.title.x = element_text(vjust = -1)
+  ) +
+  annotate("rect",
+    xmin = -Inf,
+    xmax = Inf,
+    ymax = above$team[nrow(above)],
+    ymin = above$team[1],
+    fill = "#486e48",
+    alpha = 1 / 3
+  ) +
+  annotate("rect",
+    xmin = -Inf,
+    xmax = Inf,
+    ymax = below$team[nrow(below)],
+    ymin = below$team[1],
+    fill = "#346991",
+    alpha = 1 / 3
+  ) +
+  annotate("text", x = -.1, y = above$team[3], label = "Best Teams") +
+  annotate("text", x = .1, y = below$team[4], label = "Worst Teams")
+```
 
 
 
