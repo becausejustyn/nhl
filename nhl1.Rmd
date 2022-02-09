@@ -5,11 +5,17 @@ output: html_notebook
 
 ```{r}
 # Load packages
-library(plyr)
 library(tidyverse)
 library(plotly)
 library(RCurl)
 ```
+
+```{r}
+maybe <- read_csv("https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv")
+
+
+```
+
 
 ```{r}
 # Step 1: Load data
@@ -17,7 +23,12 @@ data5v4 <- read_csv("https://raw.githubusercontent.com/mkmiecik14/mkmiecik14.git
 
 # Step 2: Clean up the data a little bit
 # ATL moved to WPG for 2011-2012 season
-data5v4$Team <- revalue(data5v4$Team, c(ATL = 'ATL.WPG', WPG = 'ATL.WPG'))
+
+data5v4 <- data5v4 %>%
+  mutate(across(Team, str_replace, c('ATL.WPG', 'ATL.WPG'), c('ATL', 'WPG'))) %>%
+  #for the plotting. you extracted the last two digits of each year, then used paste0
+  #so you could combine them with the / seperator
+  mutate(season_label = paste0(substr(Season, 3, 4), "/", substr(Season, 7, 8))) 
 ```
 
 Next, I plotted the global trend of total regular-season power play goals for each of the 30 NHL teams over the last decade.
@@ -27,14 +38,15 @@ Next, I plotted the global trend of total regular-season power play goals for ea
 
 data5v4 %>%
   ggplot(aes(
-    x = factor(Season), y = GF, group = 1)) +
+    x = factor(season_label), y = GF, group = 1)) +
   geom_line(aes(group = factor(Team)), alpha = 1/2) + 
-  geom_line(stat = 'summary', fun.y = 'mean', colour = 'red') +
+  geom_line(stat = 'summary', fun = 'mean', colour = 'blue', size = 1) +
   labs(
     x = "Season",
     y = "Total Season Power Play Goals (5v4)"
   ) +
-  theme(axis.text.x = element_text(angle = 15, hjust = 1))
+  theme(axis.text.x = element_text(angle = 15, hjust = 1)) +
+  hrbrthemes::theme_ft_rc()
 ```
 
 In this above plot, each team is a grey line, while the average total power play goals for each season is plotted in the red trend line. However, we see that this doesn’t control for the shortened lockout season that occurred in 2012-2013. Let’s control for this by dividing the total power play goals (GF) by the total games played (GP) each season.
@@ -43,14 +55,16 @@ In this above plot, each team is a grey line, while the average total power play
 # Step 2b: Control for games played due to partial lockout season (2012-2013)
 data5v4 %>%
   ggplot(aes(
-    x = factor(Season), y = GF/GP, group = 1)) +
+    x = factor(season_label), 
+    y = GF/GP, group = 1)) +
   geom_line(aes(group = factor(Team)), alpha = 1/2) + 
-  geom_line(stat = 'summary', fun.y = 'mean', colour = 'red') +
+  geom_line(stat = 'summary', fun = 'mean', colour = 'blue', size = 1) +
   labs(
     x = "Season",
     y = "Total Season Power Play Goals/Games Played (5v4)"
   ) +
-  theme(axis.text.x = element_text(angle = 15, hjust = 1))
+  theme(axis.text.x = element_text(angle = 15, hjust = 1)) +
+  hrbrthemes::theme_ft_rc()
 ```
 
 We now see each team’s power play performance controlled for the games played that season. What is interesting about this above plot is the seemingly decrease in power play goals across time. Let’s model this with a linear regression that predicts the total season power play goals controlled for games played as a function of time/season.
@@ -60,6 +74,7 @@ We now see each team’s power play performance controlled for the games played 
 # power play goals/game and season
 mod <- lm((GF/GP) ~ factor(Season), data = data5v4)
 summary(mod) # Very significant negative trend over time
+#broom::tidy(mod)
 ```
 
 As we can see from the regression model and coefficients, power play goals are decreasing with each successive season. Here is a plot of this negative trend in blue.
@@ -68,15 +83,17 @@ As we can see from the regression model and coefficients, power play goals are d
 # Step 3b: Plot this linear trend over time
 data5v4 %>%
   ggplot(aes(
-    x = factor(Season), y = GF/GP, group = 1)) +
+    x = factor(season_label), 
+    y = GF/GP, group = 1)) +
   geom_line(aes(group = factor(Team)), alpha = 1/2) + 
-  geom_line(stat = 'summary', fun.y = 'mean', colour = 'red') +
+  geom_line(stat = 'summary', fun = 'mean', colour = 'blue', size = 1) +
   labs(
     x = "Season",
     y = "Total Season Power Play Goals/Games Played (5v4)"
   ) +
-  stat_smooth(method = 'lm', col = 'blue', se = F) +
-  theme(axis.text.x = element_text(angle = 15, hjust = 1))
+  stat_smooth(method = 'lm', col = '#984ea3', se = FALSE, size = 1) +
+  theme(axis.text.x = element_text(angle = 15, hjust = 1)) +
+  hrbrthemes::theme_ft_rc()
 ```
 
 I then wondered which teams, despite this decrease in power play goals over time, had the best or worst power play across the last decade? To remove this negative trend over time, I extracted the residuals from the model. The residuals are simply the distance from the blue line (the predicted power play goals over time) to each team’s grey line (total power play goals/games played for each year).
@@ -95,14 +112,17 @@ Next, I averaged these residuals for each individual team over ten years and ran
 # perform a one-sample t-test (i.e., from zero) to see teams that were above
 # or below the average power play goals/game despite the decrease in 
 # power play goals in the last decade  
+
 bestPP <- data5v4 %>% 
-  group_by(Team) %>% 
-  summarise_at('rel_ppg', 
-               funs(mean = mean,
-                    sd = sd,
-                    sem = sd(.)/sqrt(n()),
-                    tpval = t.test(.)$p.value)) %>%
-  mutate(sig = tpval < .05)
+    group_by(Team) %>%
+    summarise(
+        mean = mean(rel_ppg),
+        sd = sd(rel_ppg),
+        sem = sd(rel_ppg)/sqrt(n()),
+        tpval = t.test(rel_ppg)$p.value
+    ) %>%
+    mutate(sig = tpval < .05)
+
 print(bestPP)
 ```
 
@@ -114,85 +134,79 @@ Finally, I plotted these results. Teams that have positive averages that are dif
 
 # -- To get y.axis bold conditional -- # 
 bestPPSort <- arrange(bestPP, mean)                       
-axisFace <- ifelse(bestPPSort$sig == T,'bold', 'plain')
+axisFace <- ifelse(bestPPSort$sig == TRUE, 'bold', 'plain')
 # -- To get y.axis bold conditional -- #
   
 # -- To get shading conditional -- #
-above <- bestPP %>% filter(mean > 0, sig == TRUE) %>% arrange(mean)
-average <- bestPP %>% filter(sig == FALSE)
-below <- bestPP %>% filter(mean < 0, sig == TRUE) %>% arrange(mean)
+above <- bestPP %>% 
+  filter(mean > 0, sig == TRUE) %>% 
+  arrange(mean)
+
+average <- bestPP %>% 
+  filter(sig == FALSE)
+
+below <- bestPP %>% 
+  filter(mean < 0, sig == TRUE) %>% 
+  arrange(mean)
+
 # -- To get shading conditional -- #
-  
-ggplot(bestPP, aes(mean, reorder(Team, mean), colour = sig)) +
-  geom_errorbarh(aes(xmin = mean - sem, xmax = mean + sem)) +
+
+bestPP %>%
+  ggplot(aes(
+    x = mean,
+    y = reorder(Team, mean),
+    colour = sig
+  )) +
+  geom_errorbarh(aes(
+    xmin = mean - sem,
+    xmax = mean + sem
+  )) +
   geom_point(size = 2) +
   scale_x_continuous(limits = (c(-.2, .2))) +
-  scale_color_manual(values = c('grey', 'black'),
-                     guide = guide_legend(reverse = T,
-                                          title = 'Above/Below Average',
-                                          title.position = 'top')) +
-  labs(x = 'Mean Power Play Goals/Games Played (Residuals)',
-       y = 'NHL Team',
-       title = 'NHL 5v4 Power Play Team Performance 2007-2017',
-       caption = 'Error bars are SEM') +
-  theme_minimal() +
-  theme(axis.text.y = element_text(face = axisFace),
-        plot.title = element_text(hjust = 0.5),
-        legend.position = 'bottom',
-        legend.key = element_rect(colour = "transparent", fill = "white"),
-        legend.key.width = unit(1, 'in'),
-        legend.key.height = unit(.5, 'in'),
-        legend.title.align = .5,
-        axis.title.x = element_text(vjust = -1)) +
-  annotate('rect', 
-           xmin = -Inf, 
-           xmax = Inf, 
-           ymax = above$Team[nrow(above)],
-           ymin = above$Team[1], 
-           fill = '#33a02c', 
-           alpha = 1/3) +
-  annotate('rect', 
-         xmin = -Inf, 
-         xmax = Inf, 
-         ymax = below$Team[nrow(below)],
-         ymin = below$Team[1], 
-         fill = '#e31a1c', 
-         alpha = 1/3) +
-  annotate('text', x = -.1, y = above$Team[3], label = 'Best Teams') +
-  annotate('text', x = .1, y = below$Team[4], label = 'Worst Teams')
+  scale_color_manual(
+    values = c("grey", "black"),
+    guide = guide_legend(
+      reverse = TRUE,
+      title = "Above/Below Average",
+      title.position = "top"
+    )
+  ) +
+  labs(
+    x = "Mean Power Play Goals/Games Played (Residuals)",
+    y = "NHL Team",
+    title = "NHL 5v4 Power Play Team Performance 2007-2017",
+    caption = "Error bars are SEM"
+  ) +
+  hrbrthemes::theme_ft_rc() +
+  theme(
+    axis.text.y = element_text(face = axisFace),
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none",
+    legend.key = element_rect(colour = "transparent", fill = "white"),
+    legend.key.width = unit(1, "in"),
+    legend.key.height = unit(.5, "in"),
+    legend.title.align = .5,
+    axis.title.x = element_text(vjust = -1)
+  ) +
+  annotate("rect",
+    xmin = -Inf,
+    xmax = Inf,
+    ymax = above$Team[nrow(above)],
+    ymin = above$Team[1],
+    fill = "#2E8F48",
+    alpha = 1 / 3
+  ) +
+  annotate("rect",
+    xmin = -Inf,
+    xmax = Inf,
+    ymax = below$Team[nrow(below)],
+    ymin = below$Team[1],
+    fill = "#AD1316",
+    alpha = 1 / 3
+  ) +
+  annotate("text", x = -.1, y = above$Team[3], label = "Best Teams") +
+  annotate("text", x = .1, y = below$Team[4], label = "Worst Teams")
 ```
 
-```{r}
-dbinom(8, 10, 0.5)
-```
 
-
-
-```{r}
-dbinom(6, 10, 0.5)
-```
-
-```{r}
-# equal or greater than 8
-pbinom(q = 8, size = 10, prob = 0.5, lower.tail = FALSE)
-
-# the same
-1 - pbinom(q = 8, size = 10, prob = 0.5)
-```
-
-```{r}
-pbinom(q = 8, size = 10, prob = 0.5, lower.tail = FALSE)
-sum(dbinom(c(8:10), size = 10, prob = 0.5))
-```
-
-```{r}
-pbinom(8, size = 10, prob = 0.5, lower.tail = FALSE)  == sum(dbinom(8:10, size = 10, prob = 0.5)) 
-```
-
-```{r}
-pbinom(8, size = 10, prob = 0.5) # 0.2500107 or 25%
-1 - pbinom(8, size = 10, prob = 0.5, lower.tail = FALSE) # Equivalent
-
-sum(dbinom(9:10, size = 10, prob = 0.5)) # 0.2500107 or 25%
-```
 
