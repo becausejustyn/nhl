@@ -1,0 +1,33 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Justyn, it's 5am - why are you doing this?
+
+```{r}
+library(plotly)
+library(tidyverse)
+#library(RCurl)
+```
+
+```{r}
+maybe <- read_csv("https://moneypuck.com/moneypuck/playerData/careers/gameByGame/all_teams.csv")
+```
+
+```{r}
+maybe <- maybe %>%
+  mutate(team = str_replace_all(
+    team,
+    c(
+      "ATL" = "WPG",
+      "L.A" = "LAK",
+      "N.J" = "NJD",
+      "S.J" = "SJS",
+      "T.B" = "TBL"
+    )
+  ))
+```
+
+
+
