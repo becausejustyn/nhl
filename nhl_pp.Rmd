@@ -17,17 +17,44 @@ maybe <- read_csv("https://moneypuck.com/moneypuck/playerData/careers/gameByGame
 
 ```{r}
 maybe <- maybe %>%
-  mutate(team = str_replace_all(
-    team,
-    c(
-      "ATL" = "WPG",
-      "L.A" = "LAK",
-      "N.J" = "NJD",
-      "S.J" = "SJS",
-      "T.B" = "TBL"
-    )
-  ))
+  mutate(team = str_replace_all(team,
+      c(
+        "ATL" = "WPG",
+        "L.A" = "LAK",
+        "N.J" = "NJD",
+        "S.J" = "SJS",
+        "T.B" = "TBL"
+      )),
+    season_label = paste0(substr(season, 3, 4), "/", substr(season+1, 3, 4))
+  )
 ```
+
+```{r}
+maybe_sum <- maybe %>%
+  select(team, season, situation:fenwickPercentage, 
+         xOnGoalFor:scoreFlurryAdjustedTotalShotCreditAgainst) %>%
+  group_by(team, season, situation) %>%
+  summarise(across(everything(), ~sum(.x, na.rm = TRUE)), .groups = "drop") %>% 
+  mutate(season_label = paste0(substr(season, 3, 4), "/", substr(season+1, 3, 4)))
+```
+
+
+
+```{r}
+maybe_sum %>%
+  filter(situation == '5on4') %>%
+  ggplot(aes(
+    x = factor(season_label), y = goalsFor, group = 1)) +
+  geom_line(aes(group = factor(team)), alpha = 1/2) + 
+  geom_line(stat = 'summary', fun = 'mean', colour = 'blue', size = 1) +
+  labs(
+    x = "Season",
+    y = "Total Season Power Play Goals (5v4)"
+  ) +
+  theme(axis.text.x = element_text(angle = 15, hjust = 1)) +
+  hrbrthemes::theme_ft_rc()
+```
+
 
 
 
