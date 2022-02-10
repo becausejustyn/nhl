@@ -160,13 +160,14 @@ average <- bestPP %>%
 below <- bestPP %>% 
   filter(mean < 0, sig == TRUE) %>% 
   arrange(mean)
-
 # -- To get shading conditional -- #
+```
 
+```{r}
 bestPP %>%
   ggplot(aes(
     x = mean,
-    y = reorder(team, mean),
+    y = fct_reorder(team, mean),
     colour = sig
   )) +
   geom_errorbarh(aes(
@@ -206,6 +207,7 @@ bestPP %>%
     ymax = above$team[nrow(above)],
     ymin = above$team[1],
     fill = "#486e48",
+    colour = NA,
     alpha = 1 / 3
   ) +
   annotate("rect",
@@ -214,10 +216,11 @@ bestPP %>%
     ymax = below$team[nrow(below)],
     ymin = below$team[1],
     fill = "#346991",
+    colour = NA,
     alpha = 1 / 3
   ) +
   annotate("text", x = -.1, y = above$team[3], label = "Best Teams") +
-  annotate("text", x = .1, y = below$team[4], label = "Worst Teams")
+  annotate("text", x = .1, y = below$team[3], label = "Worst Teams")
 ```
 
 
